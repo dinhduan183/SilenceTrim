@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+._*
+
+# Generated application and build artifacts
+*.app/
+.build/
+DerivedData/
+.swiftpm/
+work/
+outputs/
+dist/
+*.dSYM/
+
+# Generated processing reports
+SilenceTrim-report-*.json
