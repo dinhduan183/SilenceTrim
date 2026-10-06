@@ -33,7 +33,7 @@ jobs:
         run: ./build.command
       - name: Verify app and test paths
         run: |
-          lipo -verify_arch arm64 x86_64 SilenceTrim.app/Contents/MacOS/SilenceTrim
+          lipo SilenceTrim.app/Contents/MacOS/SilenceTrim -verify_arch arm64 x86_64
           codesign --verify --deep --strict SilenceTrim.app
           zsh tests/run.command
       - name: Package macOS app
