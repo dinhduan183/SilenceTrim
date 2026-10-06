@@ -10,6 +10,10 @@ DerivedData/
 work/
 outputs/
 dist/
+build/
+__pycache__/
+*.py[cod]
+.venv/
 *.dSYM/
 
 # Generated processing reports

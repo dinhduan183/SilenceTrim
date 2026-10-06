@@ -1,0 +1,134 @@
+name: Build macOS and Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  PYTHONUTF8: '1'
+
+jobs:
+  macos:
+    name: macOS Universal (Apple Silicon + Intel)
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install FFmpeg for tests
+        run: command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null || brew install ffmpeg
+      - name: Build Universal app
+        env:
+          BUILD_ARCHS: arm64 x86_64
+        run: ./build.command
+      - name: Verify app and test paths
+        run: |
+          lipo -verify_arch arm64 x86_64 SilenceTrim.app/Contents/MacOS/SilenceTrim
+          codesign --verify --deep --strict SilenceTrim.app
+          zsh tests/run.command
+      - name: Package macOS app
+        shell: bash
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' SilenceTrim.app/Contents/Info.plist)
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$VERSION" ]]; then
+            echo 'Tag does not match app version' >&2
+            exit 1
+          fi
+          mkdir -p artifacts
+          ditto -c -k --sequesterRsrc --keepParent SilenceTrim.app "artifacts/SilenceTrim-v${VERSION}-macOS-Universal.zip"
+          cd artifacts
+          shasum -a 256 *.zip > SHA256SUMS-macOS.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SilenceTrim-macOS
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  windows:
+    name: Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          architecture: x64
+          cache: pip
+          cache-dependency-path: windows/requirements.txt
+      - name: Install FFmpeg for tests
+        shell: pwsh
+        run: |
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg --no-progress -y --limit-output
+            if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+          }
+          $MachinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          "$MachinePath;$UserPath".Split(';') | Where-Object { $_ } | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Install build dependencies
+        run: python -m pip install -r windows/requirements.txt
+      - name: Test engine and GUI
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s windows/tests -v
+      - name: Build Windows app and CLI
+        shell: pwsh
+        run: ./build-windows.ps1
+      - name: Smoke test packaged executables
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python windows/tests/smoke_package.py dist/SilenceTrim
+      - name: Package Windows app
+        shell: pwsh
+        run: |
+          $Version = python -c "import sys; sys.path.insert(0, 'windows'); from silencetrim import VERSION; print(VERSION)"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$Version") {
+            throw 'Tag does not match app version'
+          }
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          $Zip = "SilenceTrim-v$Version-Windows-x64.zip"
+          Compress-Archive -Path dist/SilenceTrim -DestinationPath "artifacts/$Zip"
+          $Hash = (Get-FileHash "artifacts/$Zip" -Algorithm SHA256).Hash.ToLower()
+          "$Hash  $Zip" | Set-Content artifacts/SHA256SUMS-Windows.txt -Encoding ascii
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SilenceTrim-Windows
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: SilenceTrim-*
+          merge-multiple: true
+          path: artifacts
+      - name: Create release and attach both builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "SilenceTrim $GITHUB_REF_NAME" --notes-file .github/RELEASE_NOTES.md
+          fi
+          gh release upload "$GITHUB_REF_NAME" artifacts/* --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false

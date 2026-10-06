@@ -49,7 +49,7 @@ struct Track: Codable {
     var verifiedTrailing: Double? = nil
 }
 struct BatchReport: Codable {
-    var version = "1.0"
+    var version = "2.0"
     var createdAt = ISO8601DateFormatter().string(from: Date())
     var settings: TrimSettings
     var tracks: [Track]
@@ -57,6 +57,17 @@ struct BatchReport: Codable {
 
 final class TrimEngine {
     static let extensions: Set<String> = ["mp3", "m4a", "aac", "flac", "wav", "aif", "aiff", "ogg", "opus"]
+    static func canonicalURL(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+    static func relativePath(of file: URL, in folder: URL) throws -> String {
+        let root = canonicalURL(folder).pathComponents
+        let components = canonicalURL(file).pathComponents
+        guard components.count > root.count, components.starts(with: root) else {
+            throw TrimError.message("File không nằm trong thư mục nguồn.")
+        }
+        return components.dropFirst(root.count).joined(separator: "/")
+    }
     private let lock = NSLock()
     private var stopped = false
     private var activeProcess: Process?
@@ -100,8 +111,8 @@ final class TrimEngine {
     }
     func inventory(_ folder: URL, settings: TrimSettings, excluding output: URL? = nil) throws -> [URL] {
         try settings.validate()
-        let root = folder.resolvingSymlinksInPath().standardizedFileURL
-        let exclude = output?.resolvingSymlinksInPath().standardizedFileURL.path
+        let root = Self.canonicalURL(folder)
+        let exclude = output.map { Self.canonicalURL($0).pathComponents }
         let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey]
         let options: FileManager.DirectoryEnumerationOptions = settings.recursive ? [.skipsHiddenFiles, .skipsPackageDescendants] : [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
         guard let iterator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: keys, options: options) else {
@@ -112,8 +123,9 @@ final class TrimEngine {
             try checkCancellation()
             let values = try url.resourceValues(forKeys: Set(keys))
             if values.isSymbolicLink == true { continue }
-            if let exclude, url.path == exclude || url.path.hasPrefix(exclude + "/") { if values.isDirectory == true { iterator.skipDescendants() }; continue }
-            if values.isRegularFile == true, Self.extensions.contains(url.pathExtension.lowercased()) { files.append(url) }
+            let file = Self.canonicalURL(url)
+            if let exclude, file.pathComponents.starts(with: exclude) { if values.isDirectory == true { iterator.skipDescendants() }; continue }
+            if values.isRegularFile == true, Self.extensions.contains(file.pathExtension.lowercased()) { files.append(file) }
         }
         return files.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
@@ -240,9 +252,9 @@ final class TrimEngine {
         throw TrimError.message("Không đạt giới hạn im lặng bằng cắt lossless; file gốc được giữ nguyên.")
     }
     static func validateOutput(_ output: URL, input: URL) throws {
-        let out = output.resolvingSymlinksInPath().standardizedFileURL.path
-        let source = input.resolvingSymlinksInPath().standardizedFileURL.path
-        guard out != source, !source.hasPrefix(out + "/") else { throw TrimError.message("Chọn thư mục xuất khác thư mục gốc và không phải thư mục cha của nó.") }
+        let out = canonicalURL(output).pathComponents
+        let source = canonicalURL(input).pathComponents
+        guard !source.starts(with: out) else { throw TrimError.message("Chọn thư mục xuất khác thư mục gốc và không phải thư mục cha của nó.") }
     }
     static func saveReport(_ tracks: [Track], settings: TrimSettings, folder: URL) throws -> URL {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]

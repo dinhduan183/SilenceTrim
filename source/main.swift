@@ -125,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         try settings.validate(); return settings
     }
     func setInput(_ url: URL) {
-        inputURL = url.resolvingSymlinksInPath().standardizedFileURL
+        inputURL = TrimEngine.canonicalURL(url)
         inputLabel.stringValue = inputURL!.path; inputLabel.toolTip = inputURL!.path
         outputURL = uniqueOutput(for: inputURL!)
         outputLabel.stringValue = outputURL!.path; outputLabel.toolTip = outputURL!.path
@@ -170,7 +170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
                     guard !files.isEmpty else { throw TrimError.message("Không tìm thấy file MP3, M4A, AAC, WAV, FLAC, AIFF, OGG hoặc Opus.") }
                     for (index, url) in files.enumerated() {
                         try engine.checkCancellation()
-                        let relative = String(url.path.dropFirst(inputURL.path.count + 1))
+                        let relative = try TrimEngine.relativePath(of: url, in: inputURL)
                         DispatchQueue.main.async { self.statusLabel.stringValue = "Phân tích \(index + 1)/\(files.count): \(relative)" }
                         var track: Track
                         do { track = try engine.analyze(url, relative: relative, settings: settings) }
@@ -220,7 +220,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     }
     @objc func cancel() { engine?.cancel(); cancelButton.isEnabled = false; statusLabel.stringValue = "Đang dừng… File đã xuất vẫn được giữ lại." }
     @objc func reveal() { if let outputURL { NSWorkspace.shared.open(outputURL) } }
-    @objc func about() { alert("SilenceTrim 1.0\nỨng dụng macOS xử lý nhạc trong máy.\nKhông tải nhạc lên mạng.\nFFmpeg: \(engine?.ffmpeg.path ?? "chưa tìm thấy")\n\nMP3/AAC/Opus: stream copy.\nWAV/FLAC/ALAC: cắt lossless, giữ mẫu âm thanh.\nFile hoàn toàn im lặng được sao chép nguyên trạng.") }
+    @objc func about() { alert("SilenceTrim 2.0\nỨng dụng macOS xử lý nhạc trong máy.\nKhông tải nhạc lên mạng.\nFFmpeg: \(engine?.ffmpeg.path ?? "chưa tìm thấy")\n\nMP3/AAC/Opus: stream copy.\nWAV/FLAC/ALAC: cắt lossless, giữ mẫu âm thanh.\nFile hoàn toàn im lặng được sao chép nguyên trạng.") }
     func alert(_ text: String) { let alert = NSAlert(); alert.messageText = "SilenceTrim"; alert.informativeText = text; alert.addButton(withTitle: "OK"); alert.runModal() }
     func finish(_ message: String) { busy = false; statusLabel.stringValue = message; updateSummary(); refreshControls() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -262,14 +262,14 @@ func runCLI() -> Int32 {
         if let v = value("--threshold") { guard let n = Double(v) else { throw TrimError.message("Invalid threshold") }; settings.threshold = n }
         if let v = value("--padding") { guard let n = Double(v) else { throw TrimError.message("Invalid padding") }; settings.padding = n }
         settings.recursive = args.contains("--recursive"); try settings.validate()
-        let source = URL(fileURLWithPath: input).standardizedFileURL.resolvingSymlinksInPath(); let destination = URL(fileURLWithPath: output).standardizedFileURL.resolvingSymlinksInPath()
+        let source = TrimEngine.canonicalURL(URL(fileURLWithPath: input)); let destination = TrimEngine.canonicalURL(URL(fileURLWithPath: output))
         try TrimEngine.validateOutput(destination, input: source)
         let files = try engine.inventory(source, settings: settings, excluding: destination)
         guard !files.isEmpty else { throw TrimError.message("No supported audio files found.") }
         try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
         var tracks: [Track] = []; var failed = 0
         for file in files {
-            let relative = String(file.path.dropFirst(source.path.count + 1)); var track = Track(source: file.path, relative: relative)
+            let relative = try TrimEngine.relativePath(of: file, in: source); var track = Track(source: file.path, relative: relative)
             do { track = try engine.analyze(file, relative: relative, settings: settings); track = try engine.export(track, to: destination.appendingPathComponent(relative), settings: settings) }
             catch { track.error = error.localizedDescription; track.status = "Lỗi"; failed += 1 }
             tracks.append(track); print("\(relative): \(track.status)\(track.error.map { " — \($0)" } ?? "")")
