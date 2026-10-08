@@ -78,6 +78,9 @@ class Track:
     verifiedLeading: float | None = None
     verifiedTrailing: float | None = None
 
+    def has_unusual_silence(self, seconds: float) -> bool:
+        return self.leading > seconds or self.trailing > seconds
+
 
 def canonical(path: str | Path) -> Path:
     return Path(path).resolve()

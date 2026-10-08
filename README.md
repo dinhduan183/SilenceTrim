@@ -1,4 +1,4 @@
-# SilenceTrim 2.0
+# SilenceTrim 2.1
 
 [![Build macOS and Windows](https://github.com/dinhduan183/SilenceTrim/actions/workflows/build.yml/badge.svg)](https://github.com/dinhduan183/SilenceTrim/actions/workflows/build.yml)
 
@@ -10,8 +10,8 @@ Tải bản đã build trong [GitHub Releases](https://github.com/dinhduan183/Si
 
 | Hệ điều hành | Gói tải | Cách chạy |
 | --- | --- | --- |
-| macOS 13+ · Apple Silicon hoặc Intel | `SilenceTrim-v2.0-macOS-Universal.zip` | Giải nén và mở `SilenceTrim.app` |
-| Windows 10/11 · x64 | `SilenceTrim-v2.0-Windows-x64.zip` | Giải nén **toàn bộ thư mục**, mở `SilenceTrim/SilenceTrim.exe` |
+| macOS 13+ · Apple Silicon hoặc Intel | `SilenceTrim-v2.1-macOS-Universal.zip` | Giải nén và mở `SilenceTrim.app` |
+| Windows 10/11 · x64 | `SilenceTrim-v2.1-Windows-x64.zip` | Giải nén **toàn bộ thư mục**, mở `SilenceTrim/SilenceTrim.exe` |
 
 Windows không cần cài Python hoặc Qt. Giữ nguyên thư mục `_internal` bên cạnh các file `.exe`.
 
@@ -23,6 +23,7 @@ Bản Mac được ký ad hoc, chưa notarize; khi macOS chặn mở, dùng **Sy
 
 - Chọn hoặc kéo thư mục nhạc vào cửa sổ; tùy chọn xử lý cả thư mục con.
 - Phân tích trước khi xuất, xem mức cắt từng bài và bỏ chọn những bài muốn giữ.
+- Tô đỏ và nhắc kiểm tra bài có im lặng gốc ở đầu **hoặc** cuối dài hơn ngưỡng cảnh báo: mặc định **5 giây**, chọn **10 giây** hoặc tự nhập số giây lớn hơn 0. Đổi ngưỡng cập nhật cảnh báo ngay, không cần phân tích lại.
 - Chỉ cắt hai đầu, giữ nguyên khoảng nghỉ giữa bài.
 - MP3, AAC, OGG/Vorbis và Opus: sao chép gói âm thanh bằng stream copy, không mã hóa lại.
 - WAV/AIFF PCM, FLAC và ALAC: cắt theo mẫu âm thanh và xuất lossless, giữ nguyên các mẫu còn lại.
@@ -36,7 +37,7 @@ Bản Mac được ký ad hoc, chưa notarize; khi macOS chặn mở, dùng **Sy
 
 1. Chọn thư mục nhạc hoặc kéo thư mục vào cửa sổ.
 2. Giữ thiết lập mặc định **−60 dB / 0,5 giây**, hoặc điều chỉnh theo bài nhạc.
-3. Nhấn **1. Phân tích**, xem trước lượng cắt của từng bài.
+3. Nhấn **1. Phân tích**, xem trước lượng cắt của từng bài. Kiểm tra các bài tô đỏ có phần im lặng dài bất thường trước khi cắt; rê chuột lên bài để xem số giây ở mỗi đầu và lời nhắc. Ngưỡng cảnh báo độc lập với khoảng giữ lại và ngưỡng âm lượng dB.
 4. Nhấn **2. Cắt & xuất**.
 5. Nhấn **Mở kết quả** để xem file mới và báo cáo.
 

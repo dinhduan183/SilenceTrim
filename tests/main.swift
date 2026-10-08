@@ -19,6 +19,14 @@ func run(_ executable: URL, _ arguments: [String]) throws {
     try expect(process.terminationStatus == 0, "Command failed: \(executable.lastPathComponent)")
 }
 
+try expect(!Track(source: "", relative: "", leading: 5, trailing: 5).hasUnusualSilence(over: 5), "Exactly the warning threshold must not warn")
+try expect(!Track(source: "", relative: "", leading: 3, trailing: 3).hasUnusualSilence(over: 5), "Silence at both ends must not be added together")
+let longHead = Track(source: "", relative: "", leading: 5.1, cutStart: 4.6)
+try expect(longHead.hasUnusualSilence(over: 5), "Warning must use original head silence, not the cut length")
+try expect(!longHead.hasUnusualSilence(over: 10), "Changing the warning threshold must reclassify tracks")
+try expect(Track(source: "", relative: "", trailing: 10.1).hasUnusualSilence(over: 10), "Long tail silence must warn on its own")
+try expect(Track(source: "", relative: "", leading: 6, trailing: 6, allSilent: true).hasUnusualSilence(over: 5), "Entirely silent tracks must also warn")
+
 let input = workspace.appendingPathComponent("nhạc nguồn")
 let nested = input.appendingPathComponent("album")
 let output = input.appendingPathComponent("kết quả")

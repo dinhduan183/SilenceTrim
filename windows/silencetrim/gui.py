@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import math
 import sys
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QIcon, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
     QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
@@ -19,7 +20,7 @@ STYLE = """
 QWidget { background: #0e1724; color: #edf3f8; font-family: 'Segoe UI'; font-size: 13px; }
 QLabel#eyebrow { color: #40d7be; font-size: 11px; font-weight: 600; }
 QLabel#title { font-size: 30px; font-weight: 700; }
-QLabel#muted, QLabel#detail { color: #9eafc2; }
+QLabel#muted { color: #9eafc2; }
 QLabel#summary { color: #40d7be; font-size: 12px; font-weight: 600; }
 QFrame#card { background: #162334; border: 1px solid #25384c; border-radius: 12px; }
 QFrame#card QLabel { background: transparent; }
@@ -131,6 +132,8 @@ class Window(QMainWindow):
         self.worker = None
         self.busy = False
         self.closing = False
+        self.warning_seconds = 5.0
+        self.warning_valid = True
         self.engine = None
         container = QWidget()
         self.setCentralWidget(container)
@@ -182,6 +185,21 @@ class Window(QMainWindow):
         settings.addStretch()
         settings.addWidget(self.recursive)
         layout.addLayout(settings)
+        warning_row = QHBoxLayout()
+        warning_row.addWidget(self.label("Cảnh báo im lặng dài hơn"))
+        self.warning_preset = QComboBox()
+        for text, value in [("5 giây · mặc định", 5.0), ("10 giây", 10.0), ("Tự nhập…", None)]:
+            self.warning_preset.addItem(text, value)
+        warning_row.addWidget(self.warning_preset)
+        self.warning_custom = QLineEdit("5")
+        self.warning_custom.setFixedWidth(80)
+        self.warning_custom.setPlaceholderText("Số giây")
+        self.warning_custom.hide()
+        warning_row.addWidget(self.warning_custom)
+        self.warning_note = self.label("Tô đỏ nếu đầu hoặc cuối vượt ngưỡng. Hãy kiểm tra trước khi cắt.", "muted")
+        self.warning_note.setWordWrap(True)
+        warning_row.addWidget(self.warning_note, 1)
+        layout.addLayout(warning_row)
         note = self.label("MP3/AAC/OGG/Opus: sao chép gói âm thanh, không nén lại. WAV/FLAC/ALAC: giữ nguyên mẫu âm thanh. Khoảng nghỉ giữa bài được giữ nguyên.", "muted")
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -202,12 +220,7 @@ class Window(QMainWindow):
         self.table.setColumnWidth(5, 260)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.itemChanged.connect(self.selection_changed)
-        self.table.itemSelectionChanged.connect(self.show_detail)
         layout.addWidget(self.table, 1)
-        self.detail = self.label("Chọn một bài để xem chi tiết. File gốc luôn được giữ nguyên.", "detail")
-        self.detail.setWordWrap(True)
-        self.detail.setMinimumHeight(36)
-        layout.addWidget(self.detail)
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 100)
@@ -230,6 +243,8 @@ class Window(QMainWindow):
         self.threshold.currentIndexChanged.connect(self.invalidate)
         self.padding.textChanged.connect(self.invalidate)
         self.recursive.toggled.connect(self.invalidate)
+        self.warning_preset.currentIndexChanged.connect(self.warning_changed)
+        self.warning_custom.textChanged.connect(self.warning_changed)
         about = self.menuBar().addMenu("SilenceTrim")
         about.addAction("Về SilenceTrim", self.about)
         about.addAction("Thoát", self.close)
@@ -252,6 +267,8 @@ class Window(QMainWindow):
         return button
 
     def settings(self):
+        if not self.warning_valid:
+            raise TrimError("Ngưỡng cảnh báo phải là số giây hữu hạn lớn hơn 0.")
         try:
             padding = float(self.padding.text().replace(",", "."))
         except ValueError as error:
@@ -298,20 +315,47 @@ class Window(QMainWindow):
         self.analyzed_settings = None
         self.table.setRowCount(0)
         self.progress.setValue(0)
-        self.detail.setText("Thiết lập thay đổi sẽ cần phân tích lại. Chỉ cắt khoảng im lặng ở hai đầu.")
         self.refresh()
 
     def refresh(self):
-        for control in (self.choose_source, self.threshold, self.padding, self.recursive):
+        for control in (self.choose_source, self.threshold, self.padding, self.recursive, self.warning_preset, self.warning_custom):
             control.setEnabled(not self.busy)
         self.choose_output.setEnabled(not self.busy and self.source is not None)
-        self.analyze_button.setEnabled(not self.busy and self.source is not None and self.engine is not None)
-        self.trim_button.setEnabled(not self.busy and any(t.selected and not t.error and not t.output for t in self.tracks))
+        self.analyze_button.setEnabled(not self.busy and self.warning_valid and self.source is not None and self.engine is not None)
+        self.trim_button.setEnabled(not self.busy and self.warning_valid and any(t.selected and not t.error and not t.output for t in self.tracks))
         self.cancel_button.setEnabled(self.busy)
         self.reveal_button.setEnabled(not self.busy and self.output is not None and self.output.exists())
         self.table.setEnabled(not self.busy)
         cut = [t for t in self.tracks if not t.error and t.cutStart + t.cutEnd > 0]
         self.summary.setText(f"{len(self.tracks)} BÀI  •  {len(cut)} CẦN CẮT  •  {sum(t.cutStart + t.cutEnd for t in cut):.2f} s CÓ THỂ BỎ  •  {sum(t.output is not None for t in self.tracks)} ĐÃ XUẤT" if self.tracks else "CHƯA CÓ BÀI NHẠC")
+        warnings = sum(t.has_unusual_silence(self.warning_seconds) for t in self.tracks)
+        if warnings:
+            self.summary.setText(f"⚠ {warnings} BÀI CẦN KIỂM TRA  •  " + self.summary.text())
+
+    def warning_changed(self, *_):
+        custom = self.warning_preset.currentData() is None
+        self.warning_custom.setVisible(custom)
+        try:
+            value = float(self.warning_custom.text().replace(",", ".")) if custom else self.warning_preset.currentData()
+            self.warning_valid = math.isfinite(value) and value > 0
+        except ValueError:
+            self.warning_valid = False
+        if self.warning_valid:
+            self.warning_seconds = value
+            self.warning_note.setText("Tô đỏ nếu đầu hoặc cuối vượt ngưỡng. Hãy kiểm tra trước khi cắt.")
+            self.warning_note.setStyleSheet("")
+            for index, track in enumerate(self.tracks):
+                self.update_track(index, track, refresh=False)
+        else:
+            self.warning_note.setText("Ngưỡng cảnh báo phải là số giây hữu hạn lớn hơn 0.")
+            self.warning_note.setStyleSheet("color: #ff7373;")
+        self.refresh()
+
+    def warning_text(self, track):
+        if not track.has_unusual_silence(self.warning_seconds):
+            return ""
+        return (f"Im lặng dài bất thường: đầu {track.leading:.2f} s, cuối {track.trailing:.2f} s "
+                f"(ngưỡng {self.warning_seconds:g} s). Hãy kiểm tra bài này trước khi cắt.")
 
     def start(self, mode):
         if self.busy or self.engine is None:
@@ -342,7 +386,7 @@ class Window(QMainWindow):
         self.progress.setValue(value)
         self.status.setText(message)
 
-    def update_track(self, index, track):
+    def update_track(self, index, track, refresh=True):
         if index == len(self.tracks):
             self.tracks.append(track)
             self.table.insertRow(index)
@@ -355,33 +399,26 @@ class Window(QMainWindow):
         self.table.setItem(index, 0, checkbox)
         values = [track.relative, f"{int(track.duration) // 60}:{track.duration % 60:05.2f}",
                   f"{track.cutStart:.2f} s", f"{track.cutEnd:.2f} s", track.status]
+        warning = self.warning_text(track)
+        if warning:
+            values[-1] += " · ⚠ Im lặng dài bất thường · hãy kiểm tra"
+            checkbox.setBackground(QColor("#40232e"))
         for column, value in enumerate(values, 1):
             item = QTableWidgetItem(value)
-            item.setToolTip(track.error or value if column == 5 else track.relative)
+            tooltip = (track.error or value) if column == 5 else track.relative
+            item.setToolTip(tooltip + (f"\n{warning}" if warning else ""))
+            if warning:
+                item.setForeground(QColor("#ff7373"))
+                item.setBackground(QColor("#40232e"))
             self.table.setItem(index, column, item)
         self.table.blockSignals(False)
-        self.refresh()
+        if refresh:
+            self.refresh()
 
     def selection_changed(self, item):
         if not self.busy and item.column() == 0:
             self.tracks[item.row()].selected = item.checkState() == Qt.Checked
             self.refresh()
-
-    def show_detail(self):
-        row = self.table.currentRow()
-        if not 0 <= row < len(self.tracks):
-            return
-        track = self.tracks[row]
-        text = f"{track.relative} · "
-        if track.error:
-            text += track.error
-        elif track.allSilent:
-            text += "Toàn bộ bài dưới ngưỡng im lặng · Sao chép nguyên trạng để tránh xoá nội dung."
-        else:
-            text += f"{track.codec.upper()} · Im lặng gốc: đầu {track.leading:.2f} s, cuối {track.trailing:.2f} s"
-            if track.verifiedLeading is not None:
-                text += f" · Sau xuất: đầu {track.verifiedLeading:.2f} s, cuối {track.verifiedTrailing:.2f} s"
-        self.detail.setText(text)
 
     def cancel(self):
         self.engine.cancel()

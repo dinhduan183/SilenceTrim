@@ -15,7 +15,14 @@ final class DropView: NSView {
         onDrop?(first); return true
     }
 }
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate {
+final class WarningRowView: NSTableRowView {
+    var warning = false
+    override func drawBackground(in dirtyRect: NSRect) {
+        super.drawBackground(in: dirtyRect)
+        if warning { NSColor.systemRed.withAlphaComponent(0.12).setFill(); bounds.fill() }
+    }
+}
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     var window: NSWindow!
     var table = NSTableView()
     var inputURL: URL?; var outputURL: URL?
@@ -28,9 +35,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     var inputLabel = NSTextField(labelWithString: "Chọn hoặc kéo thư mục nhạc vào cửa sổ")
     var outputLabel = NSTextField(labelWithString: "Tự tạo thư mục xuất bên cạnh thư mục gốc")
     var statusLabel = NSTextField(labelWithString: "Sẵn sàng · File gốc luôn được giữ nguyên")
-    var detailLabel = NSTextField(wrappingLabelWithString: "Chọn một bài để xem chi tiết. Chỉ cắt im lặng ở hai đầu; khoảng nghỉ giữa bài được giữ nguyên.")
     var summary = NSTextField(labelWithString: "CHƯA CÓ BÀI NHẠC")
     var progress = NSProgressIndicator()
+    var warningPreset = NSPopUpButton()
+    var warningCustom = NSTextField(string: "5")
+    var warningNote = NSTextField(wrappingLabelWithString: "Tô đỏ nếu đầu hoặc cuối vượt ngưỡng. Hãy kiểm tra trước khi cắt.")
+    var warningSeconds: Double = 5
+    var warningValid = true
     let accent = NSColor(calibratedRed: 0.24, green: 0.84, blue: 0.70, alpha: 1)
     func applicationDidFinishLaunching(_ notification: Notification) {
         makeMenu()
@@ -62,6 +73,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         recursive.target = self; recursive.action = #selector(settingsChanged)
         let settingsRow = horizontal([label("Ngưỡng im lặng", size: 12), threshold, label("Giữ tối đa", size: 12), padding, label("giây / phía", size: 12), spacer(), recursive]); settingsRow.spacing = 10
         full(settingsRow, content)
+        warningPreset.addItems(withTitles: ["5 giây · mặc định", "10 giây", "Tự nhập…"])
+        warningPreset.target = self; warningPreset.action = #selector(warningChanged)
+        warningCustom.widthAnchor.constraint(equalToConstant: 70).isActive = true
+        warningCustom.alignment = .center; warningCustom.isHidden = true; warningCustom.delegate = self
+        warningCustom.placeholderString = "Số giây"
+        warningNote.font = .systemFont(ofSize: 11); warningNote.textColor = .secondaryLabelColor
+        warningNote.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        full(horizontal([label("Cảnh báo im lặng dài hơn", size: 12), warningPreset, warningCustom, warningNote]), content)
         let note = NSTextField(wrappingLabelWithString: "Âm dưới ngưỡng được xem là im lặng. MP3/AAC/Opus cắt theo gói âm thanh, không nén lại; WAV/FLAC/ALAC giữ nguyên mẫu âm thanh. Có thể giữ ít hơn 0,5 giây để bù biên gói.")
         note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor; full(note, content)
         summary.font = .systemFont(ofSize: 11, weight: .semibold); summary.textColor = accent; full(summary, content)
@@ -80,8 +99,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         scroll.wantsLayer = true; scroll.layer?.cornerRadius = 10
         full(scroll, content); scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 180).isActive = true
         scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
-        detailLabel.font = .systemFont(ofSize: 11); detailLabel.textColor = .secondaryLabelColor
-        full(detailLabel, content); detailLabel.heightAnchor.constraint(equalToConstant: 43).isActive = true
         progress.style = .bar; progress.isIndeterminate = false; progress.minValue = 0; progress.maxValue = 100; full(progress, content)
         analyzeButton = button("1. Phân tích", #selector(analyze)); analyzeButton.keyEquivalent = "r"
         trimButton = button("2. Cắt & xuất", #selector(trim)); trimButton.bezelColor = accent; trimButton.keyEquivalent = "\r"
@@ -119,6 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         return wrapper
     }
     func readSettings() throws -> TrimSettings {
+        guard warningValid else { throw TrimError.message("Ngưỡng cảnh báo phải là số giây hữu hạn lớn hơn 0.") }
         let thresholds: [Double] = [-60, -70, -80, -50, -40]
         guard let value = Double(padding.stringValue.replacingOccurrences(of: ",", with: ".")) else { throw TrimError.message("Khoảng giữ lại phải là số, ví dụ 0.5.") }
         let settings = TrimSettings(threshold: thresholds[max(0, threshold.indexOfSelectedItem)], padding: value, recursive: recursive.state == .on)
@@ -145,18 +163,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         }
     }
     @objc func settingsChanged() { if !busy { invalidate() } }
-    func invalidate() { tracks = []; table.reloadData(); progress.doubleValue = 0; updateSummary(); refreshControls(); detailLabel.stringValue = "Thiết lập thay đổi sẽ cần phân tích lại. Chỉ cắt khoảng im lặng ở hai đầu." }
+    @objc func warningChanged() {
+        let custom = warningPreset.indexOfSelectedItem == 2
+        warningCustom.isHidden = !custom
+        let value = custom ? Double(warningCustom.stringValue.replacingOccurrences(of: ",", with: ".")) : (warningPreset.indexOfSelectedItem == 0 ? 5.0 : 10.0)
+        warningValid = value.map { $0.isFinite && $0 > 0 } ?? false
+        if warningValid, let value {
+            warningSeconds = value
+            warningNote.stringValue = "Tô đỏ nếu đầu hoặc cuối vượt ngưỡng. Hãy kiểm tra trước khi cắt."
+            warningNote.textColor = .secondaryLabelColor
+            let row = table.selectedRow
+            table.reloadData()
+            if tracks.indices.contains(row) { table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false) }
+        } else {
+            warningNote.stringValue = "Ngưỡng cảnh báo phải là số giây hữu hạn lớn hơn 0."
+            warningNote.textColor = .systemRed
+        }
+        updateSummary(); refreshControls()
+    }
+    func controlTextDidChange(_ notification: Notification) {
+        if (notification.object as? NSTextField) === warningCustom { warningChanged() }
+    }
+    func warningText(_ track: Track) -> String? {
+        guard track.hasUnusualSilence(over: warningSeconds) else { return nil }
+        return "Im lặng dài bất thường: đầu \(seconds(track.leading)), cuối \(seconds(track.trailing)) (ngưỡng \(warningSeconds.formatted()) s). Hãy kiểm tra bài này trước khi cắt."
+    }
+    func invalidate() { tracks = []; table.reloadData(); progress.doubleValue = 0; updateSummary(); refreshControls() }
     func refreshControls() {
         chooseInput.isEnabled = !busy; chooseOutput.isEnabled = !busy && inputURL != nil
         threshold.isEnabled = !busy; padding.isEnabled = !busy; recursive.isEnabled = !busy
-        analyzeButton.isEnabled = !busy && inputURL != nil && engine != nil
-        trimButton.isEnabled = !busy && tracks.contains { $0.selected && $0.error == nil && $0.output == nil }
+        warningPreset.isEnabled = !busy; warningCustom.isEnabled = !busy
+        analyzeButton.isEnabled = !busy && warningValid && inputURL != nil && engine != nil
+        trimButton.isEnabled = !busy && warningValid && tracks.contains { $0.selected && $0.error == nil && $0.output == nil }
         cancelButton.isEnabled = busy
         revealButton.isEnabled = !busy && outputURL.map { FileManager.default.fileExists(atPath: $0.path) } == true
     }
     func updateSummary() {
         let good = tracks.filter { $0.error == nil }; let trim = good.filter { $0.cutStart + $0.cutEnd > 0 }
         summary.stringValue = tracks.isEmpty ? "CHƯA CÓ BÀI NHẠC" : "\(tracks.count) BÀI  •  \(trim.count) CẦN CẮT  •  \(seconds(trim.reduce(0) { $0 + $1.cutStart + $1.cutEnd })) CÓ THỂ BỎ  •  \(tracks.filter { $0.output != nil }.count) ĐÃ XUẤT"
+        let warnings = tracks.filter { $0.hasUnusualSilence(over: warningSeconds) }.count
+        if warnings > 0 { summary.stringValue = "⚠ \(warnings) BÀI CẦN KIỂM TRA  •  " + summary.stringValue }
     }
     @objc func analyze() {
         guard !busy, let engine, let inputURL, let outputURL else { return }
@@ -220,35 +266,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     }
     @objc func cancel() { engine?.cancel(); cancelButton.isEnabled = false; statusLabel.stringValue = "Đang dừng… File đã xuất vẫn được giữ lại." }
     @objc func reveal() { if let outputURL { NSWorkspace.shared.open(outputURL) } }
-    @objc func about() { alert("SilenceTrim 2.0\nỨng dụng macOS xử lý nhạc trong máy.\nKhông tải nhạc lên mạng.\nFFmpeg: \(engine?.ffmpeg.path ?? "chưa tìm thấy")\n\nMP3/AAC/Opus: stream copy.\nWAV/FLAC/ALAC: cắt lossless, giữ mẫu âm thanh.\nFile hoàn toàn im lặng được sao chép nguyên trạng.") }
+    @objc func about() { alert("SilenceTrim 2.1\nỨng dụng macOS xử lý nhạc trong máy.\nKhông tải nhạc lên mạng.\nFFmpeg: \(engine?.ffmpeg.path ?? "chưa tìm thấy")\n\nMP3/AAC/Opus: stream copy.\nWAV/FLAC/ALAC: cắt lossless, giữ mẫu âm thanh.\nFile hoàn toàn im lặng được sao chép nguyên trạng.") }
     func alert(_ text: String) { let alert = NSAlert(); alert.messageText = "SilenceTrim"; alert.informativeText = text; alert.addButton(withTitle: "OK"); alert.runModal() }
     func finish(_ message: String) { busy = false; statusLabel.stringValue = message; updateSummary(); refreshControls() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply { engine?.cancel(); return .terminateNow }
     func windowShouldClose(_ sender: NSWindow) -> Bool { engine?.cancel(); return true }
     func numberOfRows(in tableView: NSTableView) -> Int { tracks.count }
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let view = WarningRowView(); view.warning = tracks[row].hasUnusualSilence(over: warningSeconds); return view
+    }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard row < tracks.count, let id = tableColumn?.identifier.rawValue else { return nil }; let track = tracks[row]
         if id == "selected" {
             let b = NSButton(checkboxWithTitle: "", target: self, action: #selector(toggleTrack(_:))); b.tag = row; b.state = track.selected ? .on : .off; b.isEnabled = !busy && track.error == nil && track.output == nil; return b
         }
+        let warning = warningText(track)
         let text: String
-        switch id { case "file": text = track.relative; case "duration": text = timeText(track.duration); case "head": text = seconds(track.cutStart); case "tail": text = seconds(track.cutEnd); default: text = track.status }
+        switch id { case "file": text = track.relative; case "duration": text = timeText(track.duration); case "head": text = seconds(track.cutStart); case "tail": text = seconds(track.cutEnd); default: text = track.status + (warning != nil ? " · ⚠ Im lặng dài bất thường · hãy kiểm tra" : "") }
         let field = NSTextField(labelWithString: text); field.font = id == "file" ? .systemFont(ofSize: 12, weight: .medium) : .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         field.lineBreakMode = .byTruncatingMiddle; field.toolTip = id == "status" ? (track.error ?? track.status) : track.relative
         if id == "status" { field.textColor = track.error != nil ? .systemOrange : track.output != nil ? accent : .secondaryLabelColor }
+        if let warning { field.textColor = .systemRed; field.toolTip = (field.toolTip ?? "") + "\n" + warning }
         return field
     }
     @objc func toggleTrack(_ sender: NSButton) { guard !busy, tracks.indices.contains(sender.tag) else { return }; tracks[sender.tag].selected = sender.state == .on; refreshControls() }
-    func tableViewSelectionDidChange(_ notification: Notification) {
-        let row = table.selectedRow; guard tracks.indices.contains(row) else { return }; let t = tracks[row]
-        if let error = t.error { detailLabel.stringValue = "\(t.relative) · \(error)" }
-        else if t.allSilent { detailLabel.stringValue = "\(t.relative) · Toàn bộ bài dưới ngưỡng im lặng: sao chép nguyên trạng để tránh xoá nội dung. Thử hạ ngưỡng nếu bài rất nhỏ." }
-        else {
-            let check = t.verifiedLeading.map { " · Sau xuất: đầu \(seconds($0)), cuối \(seconds(t.verifiedTrailing ?? 0))" } ?? ""
-            detailLabel.stringValue = "\(t.relative) · \(t.codec.uppercased()) · Im lặng gốc: đầu \(seconds(t.leading)), cuối \(seconds(t.trailing)) · \(t.lossless ? "Cắt chính xác lossless" : "Sao chép gói, không nén lại")\(check)"
-        }
-    }
 }
 
 func runCLI() -> Int32 {

@@ -47,9 +47,12 @@ struct Track: Codable {
     var output: String? = nil
     var verifiedLeading: Double? = nil
     var verifiedTrailing: Double? = nil
+    func hasUnusualSilence(over seconds: Double) -> Bool {
+        leading > seconds || trailing > seconds
+    }
 }
 struct BatchReport: Codable {
-    var version = "2.0"
+    var version = "2.1"
     var createdAt = ISO8601DateFormatter().string(from: Date())
     var settings: TrimSettings
     var tracks: [Track]
