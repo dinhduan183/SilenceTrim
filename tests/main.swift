@@ -19,6 +19,21 @@ func run(_ executable: URL, _ arguments: [String]) throws {
     try expect(process.terminationStatus == 0, "Command failed: \(executable.lastPathComponent)")
 }
 
+func releaseData(_ tag: String, draft: Bool = false, prerelease: Bool = false) throws -> Data {
+    try JSONSerialization.data(withJSONObject: ["tag_name": tag, "draft": draft, "prerelease": prerelease])
+}
+let versionCases: [(String, String?)] = [("v2.3", "v2.3"), ("v2.10", "v2.10"), ("2.2.1", "v2.2.1"),
+                                       ("v3.0", "v3.0"), ("v2.2", nil), ("v2.2.0", nil), ("v2.1", nil),
+                                       ("v2.3-beta", nil), ("v2..3", nil), ("release-3", nil), ("", nil)]
+for (tag, expected) in versionCases {
+    try expect(ReleaseUpdates.newerTag(in: try releaseData(tag), current: "2.2") == expected, "Wrong release comparison: \(tag)")
+}
+try expect(ReleaseUpdates.newerTag(in: try releaseData("v3.0", draft: true)) == nil, "Draft release must not show a banner")
+try expect(ReleaseUpdates.newerTag(in: try releaseData("v3.0", prerelease: true)) == nil, "Prerelease must not show a banner")
+for response in ["", "not json", "[]", "null", "{\"message\":\"rate limited\"}", "{\"tag_name\":\"v3.0\"}"] {
+    try expect(ReleaseUpdates.newerTag(in: Data(response.utf8)) == nil, "Invalid update response must be ignored")
+}
+
 try expect(!Track(source: "", relative: "", leading: 5, trailing: 5).hasUnusualSilence(over: 5), "Exactly the warning threshold must not warn")
 try expect(!Track(source: "", relative: "", leading: 3, trailing: 3).hasUnusualSilence(over: 5), "Silence at both ends must not be added together")
 let longHead = Track(source: "", relative: "", leading: 5.1, cutStart: 4.6)

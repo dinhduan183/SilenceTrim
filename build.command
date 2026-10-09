@@ -10,7 +10,7 @@ typeset -a BINARIES
 for ARCH in ${=ARCH_LIST}; do
     case "$ARCH" in arm64|x86_64) ;; *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;; esac
     BINARY="$CACHE/SilenceTrim-$ARCH"
-    swiftc -O -target "$ARCH-apple-macos13.0" -module-cache-path "$CACHE/modules" source/TrimEngine.swift source/main.swift -o "$BINARY" -framework Cocoa
+    swiftc -O -target "$ARCH-apple-macos13.0" -module-cache-path "$CACHE/modules" source/ReleaseUpdates.swift source/TrimEngine.swift source/main.swift -o "$BINARY" -framework Cocoa
     BINARIES+=("$BINARY")
 done
 lipo -create "${BINARIES[@]}" -output "$APP/Contents/MacOS/SilenceTrim"

@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix="silencetrim-package-") as temp:
     subprocess.run(command, check=True, timeout=30)
     assert (output / "bài hát.wav").read_bytes() == (source / "bài hát.wav").read_bytes()
     report = json.loads(next(output.glob("*.json")).read_text(encoding="utf-8"))
-    assert report["version"] == "2.1" and report["tracks"][0]["relative"] == "bài hát.wav"
+    assert report["version"] == "2.2" and report["tracks"][0]["relative"] == "bài hát.wav"
     environment = dict(os.environ, QT_QPA_PLATFORM="offscreen")
     subprocess.run([str(package / ("SilenceTrim" + suffix)), "--smoke-test"], env=environment, check=True, timeout=30)
 print("PASS: bundled CLI and GUI")

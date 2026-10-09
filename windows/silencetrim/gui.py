@@ -7,11 +7,13 @@ import sys
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QUrl
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPixmap
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QFileDialog, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
     QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget)
 
 from . import VERSION
+from .updates import API_URL, DOWNLOAD_URL, newer_tag
 from .engine import (Cancelled, Engine, Settings, Track, TrimError, canonical,
                      relative_path, save_report, unique_output, validate_output)
 
@@ -24,6 +26,8 @@ QLabel#muted { color: #9eafc2; }
 QLabel#summary { color: #40d7be; font-size: 12px; font-weight: 600; }
 QFrame#card { background: #162334; border: 1px solid #25384c; border-radius: 12px; }
 QFrame#card QLabel { background: transparent; }
+QFrame#updateBanner { background: #173936; border: 1px solid #40d7be; border-radius: 10px; }
+QFrame#updateBanner QLabel { background: transparent; color: #69e4d0; }
 QPushButton { background: #24374b; border: 1px solid #36506a; border-radius: 7px; padding: 10px 16px; font-weight: 600; }
 QPushButton:hover { background: #304963; }
 QPushButton:disabled { background: #182533; color: #617388; border-color: #253448; }
@@ -119,9 +123,9 @@ class Worker(QThread):
 
 
 class Window(QMainWindow):
-    def __init__(self):
+    def __init__(self, check_updates=True):
         super().__init__()
-        self.setWindowTitle(f"SilenceTrim {VERSION}")
+        self.setWindowTitle(f"SilenceTrim v{VERSION}")
         self.setWindowIcon(QIcon(str(icon_path())))
         self.resize(1100, 780)
         self.setMinimumSize(940, 690)
@@ -135,6 +139,15 @@ class Window(QMainWindow):
         self.warning_seconds = 5.0
         self.warning_valid = True
         self.engine = None
+        self.update_tag = self.dismissed_update_tag = None
+        self.update_reply = None
+        self.update_network = QNetworkAccessManager(self)
+        self.update_timer = QTimer(self)
+        self.update_timer.setInterval(3600 * 1000)
+        self.update_timer.timeout.connect(self.check_for_updates)
+        self.update_start_timer = QTimer(self)
+        self.update_start_timer.setSingleShot(True)
+        self.update_start_timer.timeout.connect(self.check_for_updates)
         container = QWidget()
         self.setCentralWidget(container)
         layout = QVBoxLayout(container)
@@ -151,6 +164,19 @@ class Window(QMainWindow):
         headings.addWidget(self.label("Cắt khoảng im lặng đầu và cuối hàng loạt, giữ lại tối đa 0,5 giây mỗi phía.", "muted"))
         hero.addLayout(headings, 1)
         layout.addLayout(hero)
+        self.update_banner = QFrame()
+        self.update_banner.setObjectName("updateBanner")
+        update_row = QHBoxLayout(self.update_banner)
+        update_row.setContentsMargins(16, 10, 16, 10)
+        self.update_label = self.label("")
+        self.update_label.setWordWrap(True)
+        update_row.addWidget(self.update_label, 1)
+        self.update_download = self.button("Xem & tải bản mới", self.open_release)
+        update_row.addWidget(self.update_download)
+        self.update_dismiss = self.button("Ẩn", self.dismiss_update)
+        update_row.addWidget(self.update_dismiss)
+        self.update_banner.hide()
+        layout.addWidget(self.update_banner)
         card = QFrame()
         card.setObjectName("card")
         paths = QVBoxLayout(card)
@@ -206,6 +232,7 @@ class Window(QMainWindow):
         self.summary = self.label("CHƯA CÓ BÀI NHẠC", "summary")
         layout.addWidget(self.summary)
         self.table = QTableWidget(0, 6)
+        self.table.setMinimumHeight(180)
         self.table.setHorizontalHeaderLabels(["Xuất", "Bài nhạc", "Độ dài", "Cắt đầu", "Cắt cuối", "Trạng thái"])
         self.table.verticalHeader().hide()
         self.table.verticalHeader().setDefaultSectionSize(40)
@@ -253,6 +280,49 @@ class Window(QMainWindow):
         except TrimError as error:
             self.status.setText(str(error))
         self.refresh()
+        self.fit_update_layout()
+        if check_updates:
+            self.update_start_timer.start(0)
+            self.update_timer.start()
+
+    def check_for_updates(self):
+        if self.update_reply is not None:
+            return
+        request = QNetworkRequest(QUrl(API_URL))
+        request.setTransferTimeout(10000)
+        request.setRawHeader(b"Accept", b"application/vnd.github+json")
+        request.setRawHeader(b"User-Agent", f"SilenceTrim/{VERSION}".encode("ascii"))
+        self.update_reply = self.update_network.get(request)
+        self.update_reply.finished.connect(self.update_check_finished)
+
+    def update_check_finished(self):
+        reply = self.update_reply
+        self.update_reply = None
+        if reply is None:
+            return
+        if reply.attribute(QNetworkRequest.HttpStatusCodeAttribute) == 200:
+            self.show_update(newer_tag(bytes(reply.readAll())))
+        reply.deleteLater()
+
+    def show_update(self, tag):
+        if tag is None or tag == self.dismissed_update_tag:
+            return
+        self.update_tag = tag
+        self.update_label.setText(f"Có phiên bản mới {tag}. Bạn đang dùng v{VERSION}.")
+        self.update_banner.show()
+        self.fit_update_layout()
+
+    def fit_update_layout(self):
+        minimum = self.centralWidget().layout().minimumSize().height() + self.menuBar().sizeHint().height()
+        self.setMinimumHeight(max(690, minimum))
+
+    def open_release(self):
+        QDesktopServices.openUrl(QUrl(DOWNLOAD_URL))
+
+    def dismiss_update(self):
+        self.dismissed_update_tag = self.update_tag
+        self.update_banner.hide()
+        self.fit_update_layout()
 
     @staticmethod
     def label(text, name=""):
@@ -441,7 +511,7 @@ class Window(QMainWindow):
         QMessageBox.information(self, "SilenceTrim", text)
 
     def about(self):
-        self.alert(f"SilenceTrim {VERSION}\nXử lý trực tiếp trên máy. Không tải nhạc lên mạng.\n"
+        self.alert(f"SilenceTrim v{VERSION}\nXử lý trực tiếp trên máy. Không tải nhạc lên mạng.\n"
                    f"FFmpeg: {self.engine.ffmpeg if self.engine else 'chưa tìm thấy'}\n"
                    "MP3/AAC/OGG/Opus: stream copy. WAV/FLAC/ALAC: lossless.\nFile hoàn toàn im lặng được sao chép nguyên trạng.")
 
@@ -463,6 +533,10 @@ class Window(QMainWindow):
             self.cancel()
             event.ignore()
         else:
+            self.update_timer.stop()
+            self.update_start_timer.stop()
+            if self.update_reply is not None:
+                self.update_reply.abort()
             event.accept()
 
 
@@ -472,7 +546,7 @@ def run():
     application.setApplicationVersion(VERSION)
     application.setStyle("Fusion")
     application.setStyleSheet(STYLE)
-    window = Window()
+    window = Window(check_updates="--smoke-test" not in sys.argv)
     if "--folder" in sys.argv:
         index = sys.argv.index("--folder")
         if index + 1 < len(sys.argv) and Path(sys.argv[index + 1]).is_dir():

@@ -7,13 +7,16 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
+from PySide6.QtNetwork import QNetworkRequest
 from silencetrim.gui import Window
 from silencetrim.engine import Engine, Track
+from silencetrim.updates import DOWNLOAD_URL
 
 
 class GuiTests(unittest.TestCase):
@@ -28,7 +31,7 @@ class GuiTests(unittest.TestCase):
             source.mkdir()
             self.engine._run(self.engine.ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
                                                   "-af", "adelay=1000,apad=pad_dur=1", str(source / "bài hát.wav")])
-            window = Window()
+            window = Window(check_updates=False)
             window.show()
             self.addCleanup(window.close)
             window.set_source(source)
@@ -56,7 +59,7 @@ class GuiTests(unittest.TestCase):
             self.assertEqual(window.table.rowCount(), 0)
 
     def test_long_silence_warning_and_threshold_changes(self):
-        window = Window()
+        window = Window(check_updates=False)
         self.addCleanup(window.close)
         self.assertEqual(window.warning_seconds, 5)
         tracks = [Track("", "đúng ngưỡng.wav", leading=5, trailing=5),
@@ -110,7 +113,7 @@ class GuiTests(unittest.TestCase):
             source.mkdir()
             self.engine._run(self.engine.ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
                                                   "-af", "apad=pad_dur=6", str(source / "long-tail.wav")])
-            window = Window()
+            window = Window(check_updates=False)
             self.addCleanup(window.close)
             window.set_source(source)
             window.start("analyze")
@@ -126,6 +129,51 @@ class GuiTests(unittest.TestCase):
             self.assertIsNotNone(window.tracks[0].output)
             self.assertLessEqual(window.tracks[0].verifiedTrailing, 0.500002)
             self.assertIn("Im lặng dài bất thường", window.table.item(0, 5).text())
+
+    def test_update_banner_title_dismiss_and_download(self):
+        window = Window(check_updates=False)
+        self.addCleanup(window.close)
+        self.assertEqual(window.windowTitle(), "SilenceTrim v2.2")
+        self.assertTrue(window.update_banner.isHidden())
+        window.show_update("v2.3")
+        self.assertFalse(window.update_banner.isHidden())
+        self.assertIn("v2.3", window.update_label.text())
+        self.assertIn("v2.2", window.update_label.text())
+        with patch("silencetrim.gui.QDesktopServices.openUrl") as open_url:
+            window.update_download.click()
+            self.assertEqual(open_url.call_args.args[0].toString(), DOWNLOAD_URL)
+        window.update_dismiss.click()
+        self.assertTrue(window.update_banner.isHidden())
+        window.show_update("v2.3")
+        self.assertTrue(window.update_banner.isHidden())
+        window.show_update("v2.4")
+        self.assertFalse(window.update_banner.isHidden())
+
+    def test_update_response_and_network_failure_leave_audio_controls_usable(self):
+        window = Window(check_updates=False)
+        self.addCleanup(window.close)
+        original_status = window.status.text()
+        for status, data, expected in [(200, b'{"tag_name":"v2.2","draft":false,"prerelease":false}', None),
+                                       (None, b"", None), (403, b'{"message":"rate limited"}', None),
+                                       (200, b"not json", None),
+                                       (200, b'{"tag_name":"v2.10","draft":false,"prerelease":false}', "v2.10")]:
+            reply = Mock()
+            reply.attribute.return_value = status
+            reply.readAll.return_value = data
+            with patch.object(window.update_network, "get", return_value=reply) as get:
+                window.check_for_updates()
+                window.check_for_updates()
+                self.assertEqual(get.call_count, 1)
+                request = get.call_args.args[0]
+                self.assertIn("/releases/latest", request.url().toString())
+                self.assertEqual(request.transferTimeout(), 10000)
+                window.update_check_finished()
+            reply.attribute.assert_called_once_with(QNetworkRequest.HttpStatusCodeAttribute)
+            reply.deleteLater.assert_called_once()
+            self.assertIsNone(window.update_reply)
+            self.assertEqual(window.update_tag, expected)
+            self.assertEqual(window.status.text(), original_status)
+            self.assertTrue(window.choose_source.isEnabled())
 
     def wait(self, window):
         deadline = time.monotonic() + 30

@@ -1,4 +1,4 @@
-# SilenceTrim 2.1
+# SilenceTrim 2.2
 
 [![Build macOS and Windows](https://github.com/dinhduan183/SilenceTrim/actions/workflows/build.yml/badge.svg)](https://github.com/dinhduan183/SilenceTrim/actions/workflows/build.yml)
 
@@ -10,8 +10,8 @@ Tải bản đã build trong [GitHub Releases](https://github.com/dinhduan183/Si
 
 | Hệ điều hành | Gói tải | Cách chạy |
 | --- | --- | --- |
-| macOS 13+ · Apple Silicon hoặc Intel | `SilenceTrim-v2.1-macOS-Universal.zip` | Giải nén và mở `SilenceTrim.app` |
-| Windows 10/11 · x64 | `SilenceTrim-v2.1-Windows-x64.zip` | Giải nén **toàn bộ thư mục**, mở `SilenceTrim/SilenceTrim.exe` |
+| macOS 13+ · Apple Silicon hoặc Intel | `SilenceTrim-v2.2-macOS-Universal.zip` | Giải nén và mở `SilenceTrim.app` |
+| Windows 10/11 · x64 | `SilenceTrim-v2.2-Windows-x64.zip` | Giải nén **toàn bộ thư mục**, mở `SilenceTrim/SilenceTrim.exe` |
 
 Windows không cần cài Python hoặc Qt. Giữ nguyên thư mục `_internal` bên cạnh các file `.exe`.
 
@@ -21,6 +21,8 @@ Bản Mac được ký ad hoc, chưa notarize; khi macOS chặn mở, dùng **Sy
 
 ## Tính năng
 
+- Tiêu đề cửa sổ hiển thị phiên bản, ví dụ **SilenceTrim v2.2**.
+- Kiểm tra GitHub Releases khi mở app và mỗi giờ; hiển thị banner khi có bản chính thức mới hơn, với nút **Xem & tải bản mới** và **Ẩn**. Kiểm tra chạy nền, mất mạng không ảnh hưởng xử lý nhạc; chỉ đọc thông tin release công khai, không gửi file nhạc. Nút Ẩn áp dụng cho bản đó trong phiên mở app hiện tại.
 - Chọn hoặc kéo thư mục nhạc vào cửa sổ; tùy chọn xử lý cả thư mục con.
 - Phân tích trước khi xuất, xem mức cắt từng bài và bỏ chọn những bài muốn giữ.
 - Tô đỏ và nhắc kiểm tra bài có im lặng gốc ở đầu **hoặc** cuối dài hơn ngưỡng cảnh báo: mặc định **5 giây**, chọn **10 giây** hoặc tự nhập số giây lớn hơn 0. Đổi ngưỡng cập nhật cảnh báo ngay, không cần phân tích lại.
@@ -126,11 +128,12 @@ Bộ kiểm thử kiểm tra đường dẫn/symlink, loại trừ thư mục xu
 
 Workflow [build.yml](.github/workflows/build.yml) chạy khi push lên `main`, tạo pull request, push tag `v*` hoặc bấm **Run workflow**. Hai job tạo gói Mac Universal và Windows x64 cùng checksum SHA-256, tải lên Actions artifacts.
 
-Khi push tag đúng với số phiên bản trong mã nguồn, workflow chờ **cả hai job build và kiểm thử thành công** rồi tự tạo GitHub Release và đính kèm hai gói tải. Để phát hành phiên bản mới, cập nhật số phiên bản trong `source/Info.plist`, thông tin About/báo cáo Mac, `windows/silencetrim/__init__.py` và `windows/version_info.txt` trước khi tạo tag tương ứng.
+Khi push tag đúng với số phiên bản trong mã nguồn, workflow chờ **cả hai job build và kiểm thử thành công** rồi tự tạo GitHub Release và đính kèm hai gói tải. Để phát hành phiên bản mới, cập nhật số phiên bản trong `source/Info.plist`, `AppVersion.current` trong `source/ReleaseUpdates.swift`, `windows/silencetrim/__init__.py` và `windows/version_info.txt` trước khi tạo tag tương ứng.
 
 ## Mã nguồn
 
 - `source/main.swift`, `source/TrimEngine.swift`: giao diện và engine macOS.
+- `source/ReleaseUpdates.swift`, `windows/silencetrim/updates.py`: so sánh phiên bản và đọc thông tin GitHub Releases.
 - `source/AppIcon.icns`, `source/AppIcon.png`, `source/AppIcon.ico`: cùng logo cho hai nền tảng.
 - `windows/silencetrim/`: giao diện Qt, engine FFmpeg và CLI Windows.
 - `build.command`, `build-windows.ps1`: build từng nền tảng.

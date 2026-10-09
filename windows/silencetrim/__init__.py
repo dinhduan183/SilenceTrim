@@ -1,3 +1,3 @@
 """SilenceTrim for Windows."""
 
-VERSION = "2.1"
+VERSION = "2.2"

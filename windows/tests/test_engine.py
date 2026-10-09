@@ -178,7 +178,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(run_cli(["--input", str(self.source), "--output", str(self.output), "--recursive"]), 0)
         reports = list(self.output.glob("*.json"))
         report = json.loads(reports[0].read_text(encoding="utf-8"))
-        self.assertEqual(report["version"], "2.1")
+        self.assertEqual(report["version"], "2.2")
         self.assertEqual(report["tracks"][0]["relative"], "album/bài hát.wav")
         self.assertTrue((self.output / "album" / "bài hát.wav").is_file())
         self.assertEqual(run_cli(["--input", str(self.source), "--output", str(self.output), "--recursive"]), 1)

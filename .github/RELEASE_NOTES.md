@@ -1,9 +1,10 @@
-SilenceTrim 2.1 thêm cảnh báo bài có khoảng im lặng dài bất thường ở đầu hoặc cuối trên macOS và Windows.
+SilenceTrim 2.2 hiển thị phiên bản trên tiêu đề cửa sổ và thông báo khi có bản mới trên GitHub Releases.
 
-- Tô đỏ bài khi im lặng gốc ở đầu **hoặc** cuối dài hơn ngưỡng cảnh báo; hiển thị lời nhắc kiểm tra trong cột Trạng thái và số bài cần kiểm tra phía trên bảng.
-- Ngưỡng mặc định **5 giây**, có lựa chọn **10 giây** hoặc tự nhập số giây lớn hơn 0. Đổi ngưỡng cập nhật ngay, không cần phân tích lại.
-- Rê chuột lên bài để xem số giây im lặng ở mỗi đầu và lời nhắc. Bỏ dòng chi tiết/cảnh báo dưới bảng để giao diện gọn hơn.
-- Cảnh báo dựa trên im lặng của file gốc, độc lập với lượng cắt và vẫn hiển thị sau khi xuất.
+- Tiêu đề trên cả macOS và Windows: **SilenceTrim v2.2**.
+- Kiểm tra release chính thức khi mở app và mỗi giờ trong lúc app còn chạy. Chỉ hiển thị banner nếu phiên bản mới hơn bản đang dùng.
+- Banner có nút **Xem & tải bản mới** mở GitHub Releases và nút **Ẩn** cho phiên mở app hiện tại.
+- Kiểm tra chạy nền, có timeout; mất mạng hoặc lỗi GitHub không ảnh hưởng việc phân tích/cắt nhạc. Chỉ đọc thông tin release công khai, không gửi file nhạc.
+- Giữ cảnh báo im lặng dài bất thường và giao diện bảng gọn của v2.1.
 
 - **macOS Universal**: một app cho cả Apple Silicon và Intel, macOS 13 trở lên.
 - **Windows x64**: giao diện Qt và CLI đóng gói sẵn, không cần cài Python.

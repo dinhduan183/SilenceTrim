@@ -42,11 +42,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     var warningNote = NSTextField(wrappingLabelWithString: "Tô đỏ nếu đầu hoặc cuối vượt ngưỡng. Hãy kiểm tra trước khi cắt.")
     var warningSeconds: Double = 5
     var warningValid = true
+    var updateBanner: NSView!
+    var updateLabel = NSTextField(wrappingLabelWithString: "")
+    var updateTask: URLSessionDataTask?
+    var updateTimer: Timer?
+    var updateTag: String?
+    var dismissedUpdateTag: String?
     let accent = NSColor(calibratedRed: 0.24, green: 0.84, blue: 0.70, alpha: 1)
     func applicationDidFinishLaunching(_ notification: Notification) {
         makeMenu()
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1040, height: 760), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "SilenceTrim"; window.minSize = NSSize(width: 920, height: 690); window.delegate = self
+        window.title = "SilenceTrim v\(AppVersion.current)"; window.minSize = NSSize(width: 920, height: 690); window.delegate = self
         window.appearance = NSAppearance(named: .darkAqua)
         let root = DropView(); root.wantsLayer = true; root.layer?.backgroundColor = NSColor(calibratedRed: 0.055, green: 0.075, blue: 0.11, alpha: 1).cgColor
         root.onDrop = { [weak self] url in if self?.busy == false { self?.setInput(url) } }
@@ -59,6 +65,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         let subtitle = label("Cắt khoảng im lặng đầu và cuối hàng loạt, giữ lại tối đa 0,5 giây mỗi phía.", size: 13)
         subtitle.textColor = .secondaryLabelColor
         let hero = vertical([eyebrow, title, subtitle], spacing: 6); full(hero, content)
+        updateLabel.font = .systemFont(ofSize: 12, weight: .medium); updateLabel.textColor = accent
+        updateLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        updateLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        updateBanner = card(horizontal([updateLabel, button("Xem & tải bản mới", #selector(openRelease)), button("Ẩn", #selector(dismissUpdate))]))
+        updateBanner.isHidden = true; full(updateBanner, content)
         chooseInput = button("Chọn thư mục…", #selector(pickInput)); chooseOutput = button("Đổi nơi xuất…", #selector(pickOutput))
         inputLabel.font = .systemFont(ofSize: 13, weight: .medium); outputLabel.font = .systemFont(ofSize: 12)
         for field in [inputLabel, outputLabel] { field.lineBreakMode = .byTruncatingMiddle; field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal) }
@@ -111,6 +122,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
         if let index = CommandLine.arguments.firstIndex(of: "--folder"), index + 1 < CommandLine.arguments.count {
             setInput(URL(fileURLWithPath: CommandLine.arguments[index + 1]))
         }
+        checkForUpdates()
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in self?.checkForUpdates() }
     }
     func makeMenu() {
         let menu = NSMenu(); let item = NSMenuItem(); menu.addItem(item); let appMenu = NSMenu(); item.submenu = appMenu
@@ -266,12 +279,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSTa
     }
     @objc func cancel() { engine?.cancel(); cancelButton.isEnabled = false; statusLabel.stringValue = "Đang dừng… File đã xuất vẫn được giữ lại." }
     @objc func reveal() { if let outputURL { NSWorkspace.shared.open(outputURL) } }
-    @objc func about() { alert("SilenceTrim 2.1\nỨng dụng macOS xử lý nhạc trong máy.\nKhông tải nhạc lên mạng.\nFFmpeg: \(engine?.ffmpeg.path ?? "chưa tìm thấy")\n\nMP3/AAC/Opus: stream copy.\nWAV/FLAC/ALAC: cắt lossless, giữ mẫu âm thanh.\nFile hoàn toàn im lặng được sao chép nguyên trạng.") }
+    func checkForUpdates() {
+        guard updateTask == nil else { return }
+        updateTask = ReleaseUpdates.check { [weak self] tag in
+            guard let self else { return }
+            self.updateTask = nil
+            guard let tag, tag != self.dismissedUpdateTag else { return }
+            self.updateTag = tag
+            self.updateLabel.stringValue = "Có phiên bản mới \(tag). Bạn đang dùng v\(AppVersion.current)."
+            self.updateBanner.isHidden = false
+        }
+    }
+    @objc func openRelease() { NSWorkspace.shared.open(ReleaseUpdates.downloadURL) }
+    @objc func dismissUpdate() { dismissedUpdateTag = updateTag; updateBanner.isHidden = true }
+    func stopUpdateChecks() { updateTimer?.invalidate(); updateTask?.cancel() }
+    @objc func about() { alert("SilenceTrim v\(AppVersion.current)\nỨng dụng macOS xử lý nhạc trong máy.\nKhông tải nhạc lên mạng.\nFFmpeg: \(engine?.ffmpeg.path ?? "chưa tìm thấy")\n\nMP3/AAC/Opus: stream copy.\nWAV/FLAC/ALAC: cắt lossless, giữ mẫu âm thanh.\nFile hoàn toàn im lặng được sao chép nguyên trạng.") }
     func alert(_ text: String) { let alert = NSAlert(); alert.messageText = "SilenceTrim"; alert.informativeText = text; alert.addButton(withTitle: "OK"); alert.runModal() }
     func finish(_ message: String) { busy = false; statusLabel.stringValue = message; updateSummary(); refreshControls() }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply { engine?.cancel(); return .terminateNow }
-    func windowShouldClose(_ sender: NSWindow) -> Bool { engine?.cancel(); return true }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply { engine?.cancel(); stopUpdateChecks(); return .terminateNow }
+    func windowShouldClose(_ sender: NSWindow) -> Bool { engine?.cancel(); stopUpdateChecks(); return true }
     func numberOfRows(in tableView: NSTableView) -> Int { tracks.count }
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let view = WarningRowView(); view.warning = tracks[row].hasUnusualSilence(over: warningSeconds); return view

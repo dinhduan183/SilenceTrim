@@ -52,7 +52,7 @@ struct Track: Codable {
     }
 }
 struct BatchReport: Codable {
-    var version = "2.1"
+    var version = AppVersion.current
     var createdAt = ISO8601DateFormatter().string(from: Date())
     var settings: TrimSettings
     var tracks: [Track]
